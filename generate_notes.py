@@ -53,8 +53,9 @@ def generate_topic_and_note(client, index):
         response = client.chat.completions.create(
             model=MODEL,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=80,
+            max_tokens=300,
             temperature=0.95,
+            reasoning_effort="low",
         )
         raw_text = response.choices[0].message.content.strip()
 
