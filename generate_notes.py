@@ -1,94 +1,106 @@
 #!/usr/bin/env python3
 """
-Daily Agentic AI Notes Generator using Groq.
-Generates 0–5 random notes about unique Agentic AI topics each day.
-Saves output as a Markdown (.md) file.
+Daily Agentic AI Notes Generator with Random Commits (0–5 per day).
+Each commit contains exactly one note about a unique Agentic AI topic.
 """
 
 import os
 import random
 import datetime
 import sys
-from groq import Groq  # pip install groq
+import subprocess
+from groq import Groq
 
 # -------------------- Configuration --------------------
 API_KEY = os.environ.get("GROQ_API_KEY")
 if not API_KEY:
     sys.exit("Error: GROQ_API_KEY environment variable not set.")
 
-# Groq's versatile model
 MODEL = "llama-3.3-70b-versatile"
 
-# Agentic AI focused prompt with distinct topic requirement
-PROMPT = (
+# Agentic AI prompt – forces a distinct topic for each note
+PROMPT_TEMPLATE = (
     "Write a short, insightful note (maximum 30 words) about a specific, "
-    "distinct facet of Agentic AI. This could include aspects like planning, "
-    "memory, tool-use, multi-agent coordination, safety, reasoning, self-reflection, "
+    "distinct facet of Agentic AI. This could include planning, memory, "
+    "tool-use, multi-agent coordination, safety, reasoning, self-reflection, "
     "or emergent behavior. IMPORTANT: Ensure this topic is completely different "
-    "from any other note generated today."
+    "from any other note generated today. (This is note #{index})"
 )
 
 NOTES_DIR = "notes"
 # ------------------------------------------------------
 
-def generate_note(client, prompt, note_index):
-    """Call Groq and return a single note. Passes index to vary context slightly."""
+def generate_note(client, index):
+    """Generate one note using Groq."""
     try:
-        # Adding the index to the prompt slightly nudges the LLM to vary topics
-        full_prompt = f"{prompt} (This is note #{note_index})"
+        prompt = PROMPT_TEMPLATE.format(index=index)
         response = client.chat.completions.create(
             model=MODEL,
-            messages=[{"role": "user", "content": full_prompt}],
+            messages=[{"role": "user", "content": prompt}],
             max_tokens=60,
-            temperature=0.95,  # Higher temp for maximum topic variety
+            temperature=0.95,
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        print(f"Error generating note: {e}")
+        print(f"Error generating note {index}: {e}")
         return None
 
-def save_notes(notes, date_str):
-    """Save all notes as a formatted Markdown file in the notes directory."""
+def create_note_file(note, date_str, index):
+    """Write a single note to a unique Markdown file."""
     os.makedirs(NOTES_DIR, exist_ok=True)
-    filename = os.path.join(NOTES_DIR, f"notes_{date_str}.md")
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = os.path.join(NOTES_DIR, f"agentic_note_{date_str}_{index:03d}.md")
     
     with open(filename, "w") as f:
-        # Header
-        f.write(f"# 🤖 Agentic AI Daily Notes - {date_str}\n\n")
-        
-        if not notes:
-            f.write("> No notes generated for today. The agents are resting. 💤\n")
-        else:
-            f.write(f"> *{len(notes)} random insights generated today.*\n\n---\n\n")
-            for idx, note in enumerate(notes, 1):
-                f.write(f"## 🧠 Insight {idx}\n\n")
-                f.write(f"{note}\n\n")
-                # Add a horizontal rule between notes except for the last one
-                if idx < len(notes):
-                    f.write("---\n\n")
+        f.write(f"# 🤖 Agentic AI Note – {date_str} (#{index})\n\n")
+        f.write(f"{note}\n")
     
-    print(f"Saved {len(notes)} notes to {filename}")
+    return filename
+
+def git_commit_and_push(filepath, date_str, index):
+    """Add, commit, and push a single file."""
+    try:
+        subprocess.run(["git", "add", filepath], check=True)
+        commit_msg = f"Agentic AI note #{index} for {date_str}"
+        subprocess.run(["git", "commit", "-m", commit_msg], check=True)
+        subprocess.run(["git", "push", "origin", "HEAD"], check=True)
+        print(f"✅ Committed and pushed: {filepath}")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Git operation failed: {e}")
+        return False
 
 def main():
-    # Randomly decide how many notes to generate (0 to 5)
-    num_notes = random.randint(0, 5)
-    print(f"Generating {num_notes} Agentic AI note(s) for today.")
+    # 1. Roll the dice – how many commits today? (0 to 5)
+    num_commits = random.randint(0, 5)
+    date_str = datetime.datetime.now().strftime("%Y-%m-%d")
+    print(f"🔢 Today's random commit count: {num_commits}")
 
-    # Initialize the Groq client
+    if num_commits == 0:
+        print("⏭️  No commits today. Exiting.")
+        return
+
+    # 2. Initialize Groq client
     client = Groq(api_key=API_KEY)
 
-    # Generate the notes
-    notes = []
-    for i in range(num_notes):
-        note = generate_note(client, PROMPT, i + 1)
-        if note:
-            notes.append(note)
-        else:
-            print(f"Failed to generate note {i+1}, skipping.")
+    # 3. Generate and commit each note separately
+    for i in range(1, num_commits + 1):
+        print(f"\n📝 Generating note #{i} ...")
+        note = generate_note(client, i)
+        if not note:
+            print(f"⚠️  Skipping note #{i} due to generation error.")
+            continue
 
-    # Save notes with today's date
-    date_str = datetime.datetime.now().strftime("%Y-%m-%d")
-    save_notes(notes, date_str)
+        # Write to a unique file
+        filepath = create_note_file(note, date_str, i)
+        print(f"💾 Created file: {filepath}")
+
+        # Commit and push immediately
+        if not git_commit_and_push(filepath, date_str, i):
+            print(f"❌ Failed to commit/push note #{i}, stopping early.")
+            break
+
+    print("\n🎉 All commits for today are done!")
 
 if __name__ == "__main__":
     main()
